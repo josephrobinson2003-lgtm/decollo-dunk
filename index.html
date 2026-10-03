@@ -153,7 +153,7 @@ const images = {};
 function loadImage(src) {
   return new Promise((res, rej) => {
     const im = new Image();
-    im.onload = () => res(im);
+    im.onload = () => (im.naturalWidth > 0 ? res(im) : rej(new Error("empty image")));
     im.onerror = rej;
     im.src = src;
   });
@@ -651,11 +651,14 @@ document.getElementById("mute").addEventListener("click", () => {
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
+const FALLBACK_OUTFIT = "assets/outfit_cannoli.png";
 Promise.all([
-  loadImage("assets/van.jpg").then(im => images.van = im),
-  ...outfits.map(o => loadImage(o.file).then(im => images[o.file] = im))
-]).then(() => { resetBall(); requestAnimationFrame(frame); })
-  .catch(() => { resetBall(); requestAnimationFrame(frame); });
+  loadImage("assets/van.jpg").then(im => images.van = im).catch(() => {}),
+  ...outfits.map(o => loadImage(o.file)
+    .catch(() => loadImage(FALLBACK_OUTFIT))
+    .then(im => images[o.file] = im)
+    .catch(() => {}))
+]).then(() => { resetBall(); requestAnimationFrame(frame); });
 </script>
 </body>
 </html>
