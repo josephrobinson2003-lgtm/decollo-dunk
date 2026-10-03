@@ -1,4 +1,4 @@
-const CACHE = "chris-dunk-v8";
+const CACHE = "chris-dunk-v9";
 const CORE = [
   "./",
   "./index.html",
@@ -9,7 +9,6 @@ const CORE = [
 ];
 // Optional game art/audio: cached if present, skipped if missing so install never fails.
 const OPTIONAL = [
-  "./assets/van.jpg",
   "./assets/outfit_elec.png",
   "./assets/outfit_hawaii.png",
   "./assets/outfit_tux.png",

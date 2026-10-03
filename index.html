@@ -112,7 +112,7 @@
     <div class="card">
       <div class="mark"></div>
       <h1>CHRIS <span>DUNK</span></h1>
-      <p>Hit the bullseye to drop Chris into the tank. His van stays in the background. Outfits change every level.</p>
+      <p>Hit the bullseye to drop Chris into the tank. Outfits change every level.</p>
       <p><b>Pull the ball back and release.</b> Three throws a level. Smaller, faster targets as you climb.</p>
       <button id="play">Play</button>
       <button id="install" class="ghost">Add to Home Screen</button>
@@ -423,6 +423,7 @@ function onDunk(accuracy) {
   state.score += pts;
   state.dunking = 1;
   state.dunkT = 0;
+  startDunkAnim();
   state.camShake = 10;
   syncHud();
   toast("DUNK  +" + pts);
@@ -434,6 +435,7 @@ function onDunk(accuracy) {
 }
 function missResolve() {
   sayMiss();
+  tauntMove();
   voice.nextTaunt = state.time + 7 + Math.random() * 3;
   if (state.balls <= 0 && !state.dunking) {
     toast(outfit().taunt);
@@ -449,6 +451,7 @@ function step(dt) {
   if (!state.dunking && !state.inFlight && state.time > voice.nextTaunt) {
     voice.nextTaunt = state.time + 6 + Math.random() * 4;
     sayTaunt();
+    tauntMove();
   }
   if (state.inFlight && state.ball) {
     const b = state.ball;
@@ -470,23 +473,15 @@ function step(dt) {
       missResolve();
     }
   }
-  if (state.dunking) {
-    state.dunkT += dt;
-    if (state.dunkT > 0.28 && state.dunkT < 0.34) {
-      spawnSplash(760, 430, 36, "#b9e6ff");
-      noise(0.45, 0.35);
+  if (state.dunking) state.dunkT += dt;
+  updateDunkTank(dt);
+  state.particles.forEach(p => {
+    p.x += p.vx; p.y += p.vy; p.vy += p.g || 0.18; p.life -= 0.02;
+    if (p.water && p.vy > 0 && p.y > TANK.surf && p.x > TANK.x + 8 && p.x < TANK.x + TANK.w - 8) {
+      p.life = 0;
+      if (Math.random() < 0.12 && water.ripples.length < 12) water.ripples.push({ x: p.x, r: 3, life: 0.6 });
     }
-    if (state.dunkT > 1.7) {
-      state.dunking = 0;
-      state.dunkT = 0;
-      state.level += 1;
-      state.balls = 3;
-      resetBall();
-      syncHud();
-      toast(outfit().name);
-    }
-  }
-  state.particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.life -= 0.02; });
+  });
   state.particles = state.particles.filter(p => p.life > 0);
 }
 function roundRect(x, y, w, h, r) {
@@ -498,90 +493,360 @@ function roundRect(x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
-function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#7ec8f8");
-  g.addColorStop(0.55, "#b7e3a8");
-  g.addColorStop(1, "#5f8f45");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-  for (let i = 0; i < 9; i++) {
-    const x = 40 + i * 130;
-    ctx.fillStyle = i % 2 ? "#2f6b34" : "#3d7d40";
-    ctx.beginPath();
-    ctx.arc(x, 150 + (i % 3) * 10, 54, 0, Math.PI * 2);
-    ctx.arc(x + 28, 170, 40, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#6b4a2a";
-    ctx.fillRect(x + 8, 190, 10, 50);
+// ================= Scenery (static layers cached offscreen; only clouds, wheel, bunting animate) =================
+const TANK = { x: 650, y: 360, w: 250, h: 185, surf: 380 };
+TANK.floor = TANK.y + TANK.h - 8;
+const SEAT = { pivotX: 830, y: 248, len: 140 };
+const CHRIS_X = 760, CHRIS_BASE = 266, CHRIS_H = 210;
+const scenery = { key: "", back: null, front: null, clouds: [] };
+function seeded(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+(function () {
+  const r = seeded(7);
+  for (let i = 0; i < 6; i++) scenery.clouds.push({ x: r() * W, y: 40 + r() * 120, s: 0.55 + r() * 0.7, v: 5 + r() * 9 });
+})();
+function rr(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+function makeLayer(fn) {
+  const k = Math.max(0.5, view.s * view.dpr);
+  const c = document.createElement("canvas");
+  c.width = Math.round(W * k); c.height = Math.round(H * k);
+  const g = c.getContext("2d");
+  g.setTransform(k, 0, 0, k, 0, 0);
+  fn(g);
+  return c;
+}
+function ensureScenery() {
+  const key = view.s.toFixed(4) + "|" + view.dpr;
+  if (scenery.key === key) return;
+  scenery.key = key;
+  scenery.back = makeLayer(paintBack);
+  scenery.front = makeLayer(paintFront);
+}
+function hillPath(g, base, amp, f1, f2, ph) {
+  g.beginPath();
+  g.moveTo(0, H);
+  for (let x = 0; x <= W; x += 20) g.lineTo(x, base - amp * (0.6 * Math.sin(x * f1 + ph) + 0.4 * Math.sin(x * f2 + ph * 2.3)));
+  g.lineTo(W, H);
+  g.closePath();
+}
+function paintBack(g) {
+  const sky = g.createLinearGradient(0, 0, 0, 380);
+  sky.addColorStop(0, "#3d8fe0");
+  sky.addColorStop(0.55, "#8fcaf3");
+  sky.addColorStop(1, "#ffe6bf");
+  g.fillStyle = sky;
+  g.fillRect(0, 0, W, H);
+  const sx = 960, sy = 92;
+  const glow = g.createRadialGradient(sx, sy, 10, sx, sy, 170);
+  glow.addColorStop(0, "rgba(255,244,200,0.9)");
+  glow.addColorStop(0.25, "rgba(255,228,150,0.45)");
+  glow.addColorStop(1, "rgba(255,228,150,0)");
+  g.fillStyle = glow;
+  g.fillRect(sx - 170, sy - 170, 340, 340);
+  g.fillStyle = "#fff6d6";
+  g.beginPath(); g.arc(sx, sy, 34, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#a9cfe0"; hillPath(g, 330, 26, 0.006, 0.017, 1.2); g.fill();
+  g.fillStyle = "#8cbf98"; hillPath(g, 352, 22, 0.009, 0.021, 0.4); g.fill();
+}
+function paintTent(g, cx, base, w, h, c1, c2) {
+  const top = base - h, roofH = h * 0.55;
+  for (let i = 0; i < 6; i++) {
+    g.fillStyle = i % 2 ? c2 : c1;
+    g.fillRect(cx - w / 2 + (w / 6) * i, top + roofH * 0.9, w / 6 + 0.5, h - roofH * 0.9);
   }
-  if (images.van) ctx.drawImage(images.van, 18, 250, 390, 292);
-  ctx.fillStyle = "rgba(0,0,0,.25)";
-  ctx.beginPath();
-  ctx.ellipse(210, 545, 150, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#67a34a";
-  ctx.fillRect(0, 545, W, 95);
+  for (let i = 0; i < 6; i++) {
+    g.fillStyle = i % 2 ? c2 : c1;
+    g.beginPath();
+    g.moveTo(cx, top);
+    g.lineTo(cx - w / 2 - 8 + ((w + 16) / 6) * i, top + roofH);
+    g.lineTo(cx - w / 2 - 8 + ((w + 16) / 6) * (i + 1), top + roofH);
+    g.closePath(); g.fill();
+  }
+  g.fillStyle = "rgba(0,0,0,.18)";
+  g.fillRect(cx - w / 2, top + roofH, w, 6);
+  g.strokeStyle = "#5a3a1a"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx, top); g.lineTo(cx, top - 16); g.stroke();
+  g.fillStyle = c1;
+  g.beginPath(); g.moveTo(cx, top - 16); g.lineTo(cx + 13, top - 12); g.lineTo(cx, top - 8); g.fill();
 }
-function drawTank(seatDrop) {
-  const x = 640, y = 330;
-  ctx.strokeStyle = "#d7dee8";
-  ctx.lineWidth = 8;
+function paintFront(g) {
+  const r = seeded(42);
+  // tree line with two tones for depth
+  for (let row = 0; row < 2; row++) {
+    for (let i = 0; i < 24; i++) {
+      const x = i * 48 - 10 + r() * 22, y = 372 + row * 14 + r() * 10, rad = 26 + r() * 16;
+      g.fillStyle = "#5b3d22";
+      g.fillRect(x - 3, y, 6, 30);
+      g.fillStyle = row ? "#2f7a3c" : "#4a9452";
+      g.beginPath();
+      g.arc(x, y - rad * 0.4, rad, 0, Math.PI * 2);
+      g.arc(x - rad * 0.7, y, rad * 0.75, 0, Math.PI * 2);
+      g.arc(x + rad * 0.7, y, rad * 0.75, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = "rgba(255,255,255,.08)";
+      g.beginPath(); g.arc(x - rad * 0.3, y - rad * 0.7, rad * 0.45, 0, Math.PI * 2); g.fill();
+    }
+  }
+  paintTent(g, 330, 456, 120, 92, "#e0413a", "#fbf3e4");
+  paintTent(g, 1015, 456, 110, 84, "#2d6fe0", "#f6d34d");
+  // picket fence
+  g.fillStyle = "#e9e3d6";
+  g.fillRect(0, 466, W, 7); g.fillRect(0, 489, W, 7);
+  for (let x = 4; x < W; x += 22) {
+    g.fillStyle = "#f6f2e8";
+    g.beginPath();
+    g.moveTo(x, 505); g.lineTo(x, 458); g.lineTo(x + 7, 450); g.lineTo(x + 14, 458); g.lineTo(x + 14, 505);
+    g.closePath(); g.fill();
+    g.fillStyle = "rgba(0,0,0,.08)";
+    g.fillRect(x + 10, 458, 4, 47);
+  }
+  // grass with mowed bands
+  const gg = g.createLinearGradient(0, 500, 0, H);
+  gg.addColorStop(0, "#74c057"); gg.addColorStop(1, "#3e8a36");
+  g.fillStyle = gg;
+  g.fillRect(0, 500, W, H - 500);
+  let y = 500, hgt = 10, k = 0;
+  while (y < H) {
+    if (k % 2) { g.fillStyle = "rgba(255,255,255,.07)"; g.fillRect(0, y, W, hgt); }
+    y += hgt; hgt *= 1.25; k++;
+  }
+  g.strokeStyle = "rgba(30,80,25,.5)"; g.lineWidth = 2;
+  for (let i = 0; i < 70; i++) {
+    const x = r() * W, yy = 515 + r() * 120;
+    g.beginPath(); g.moveTo(x, yy); g.lineTo(x - 3, yy - 7); g.moveTo(x, yy); g.lineTo(x + 3, yy - 8); g.stroke();
+  }
+  // tank shadow and throwing pedestal
+  g.fillStyle = "rgba(0,0,0,.22)";
+  g.beginPath(); g.ellipse(775, 548, 150, 12, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(168, 550, 40, 7, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#8a5a2b"; rr(g, 146, 518, 44, 32, 4); g.fill();
+  g.fillStyle = "#a8743c"; rr(g, 142, 514, 52, 8, 3); g.fill();
+}
+function drawCloud(x, y, s) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, 46 * s, 20 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(x - 30 * s, y + 6 * s, 28 * s, 15 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 32 * s, y + 5 * s, 30 * s, 16 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 6 * s, y - 14 * s, 26 * s, 18 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+function drawWheel(t) {
+  const cx = 185, cy = 250, R = 92, n = 10, a0 = t * 0.18;
+  ctx.strokeStyle = "rgba(240,244,250,.85)"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx - 55, cy + 135); ctx.moveTo(cx, cy); ctx.lineTo(cx + 55, cy + 135); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) { const a = a0 + (i / n) * Math.PI * 2; ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R); }
+  ctx.stroke();
+  const cols = ["#e0413a", "#f6d34d", "#2d6fe0", "#38b26b"];
+  for (let i = 0; i < n; i++) {
+    const a = a0 + (i / n) * Math.PI * 2, x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+    ctx.fillStyle = cols[i % 4];
+    rr(ctx, x - 8, y, 16, 12, 3); ctx.fill();
+  }
+  ctx.fillStyle = "#f6f2e8"; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill();
+}
+function drawBunting(t) {
+  const strands = [[-10, 140, 642, 178, 46], [906, 178, W + 10, 140, 26]];
+  const cols = ["#e0413a", "#f6d34d", "#2d6fe0", "#ffffff", "#38b26b"];
+  let k = 0;
+  strands.forEach(([ax, ay, bx, by, sag]) => {
+    const cx = (ax + bx) / 2, cy = (ay + by) / 2 + sag * 2;
+    ctx.strokeStyle = "rgba(60,40,30,.7)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cx, cy, bx, by); ctx.stroke();
+    const n = Math.floor(Math.hypot(bx - ax, by - ay) / 30);
+    for (let i = 1; i < n; i++) {
+      const u = i / n, x = (1 - u) * (1 - u) * ax + 2 * (1 - u) * u * cx + u * u * bx, y = (1 - u) * (1 - u) * ay + 2 * (1 - u) * u * cy + u * u * by;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(t * 2.6 + i * 0.9) * 0.14);
+      ctx.fillStyle = cols[k++ % cols.length];
+      ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(8, 0); ctx.lineTo(0, 18); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  });
+}
+function drawBackground() {
+  ensureScenery();
+  const t = performance.now() / 1000;
+  ctx.drawImage(scenery.back, 0, 0, W, H);
+  ctx.fillStyle = "rgba(255,255,255,.92)";
+  scenery.clouds.forEach(c => drawCloud(c.x, c.y, c.s));
+  drawWheel(t);
+  ctx.drawImage(scenery.front, 0, 0, W, H);
+  drawBunting(t);
+}
+function updateScenery(dt) {
+  scenery.clouds.forEach(c => { c.x += c.v * dt; if (c.x > W + 120) c.x = -120; });
+}
+
+// ================= Dunk tank, water and Chris animation =================
+const chris = { phase: "sit", t: 0, y: 0, vy: 0, rot: 0, sq: 0, taunt: 0, seat: 0, fromY: 0, fromRot: 0 };
+const water = { slosh: 0, t: 0, ripples: [], foam: 0 };
+function tauntMove() { if (chris.phase === "sit") chris.taunt = 1; }
+function surfaceY(x) {
+  const T = TANK, u = (x - (T.x + T.w / 2)) / (T.w / 2);
+  return T.surf + water.slosh * u * Math.sin(water.t * 6.5) + Math.sin(x * 0.07 + water.t * 5) * (1.2 + water.slosh * 0.15);
+}
+function splashBig() {
+  const T = TANK;
+  for (let i = 0; i < 64; i++) {
+    state.particles.push({
+      x: CHRIS_X + (Math.random() - 0.5) * 120, y: T.surf - 2,
+      vx: (Math.random() - 0.5) * 9, vy: -4 - Math.random() * 8,
+      life: 1, r: 2 + Math.random() * 4, color: Math.random() < 0.5 ? "#bfeaff" : "#effaff", g: 0.45, water: true
+    });
+  }
+  water.slosh = 15; water.t = 0; water.foam = 1;
+  water.ripples.push({ x: CHRIS_X, r: 12, life: 1 }, { x: CHRIS_X, r: 2, life: 1.3 });
+  state.camShake = 12;
+  noise(0.45, 0.35);
+}
+function startDunkAnim() {
+  Object.assign(chris, { phase: "drop", t: 0, vy: 0, taunt: 0 });
+}
+function updateDunkTank(dt) {
+  water.t += dt;
+  water.slosh *= Math.exp(-1.5 * dt);
+  if (water.foam > 0) water.foam = Math.max(0, water.foam - dt * 1.6);
+  water.ripples.forEach(r => { r.r += 110 * dt; r.life -= dt * 0.9; });
+  water.ripples = water.ripples.filter(r => r.life > 0);
+  const c = chris;
+  c.t += dt;
+  if (c.taunt > 0) c.taunt = Math.max(0, c.taunt - dt / 1.1);
+  if (c.sq > 0) c.sq = Math.max(0, c.sq - dt * 3.2);
+  if (c.phase === "drop") {
+    c.seat = Math.min(1, Math.max(0, (c.t - 0.1) / 0.16));
+    if (c.t > 0.16) {
+      c.vy += 2600 * dt; c.y += c.vy * dt;
+      c.rot += (0.24 - c.rot) * Math.min(1, dt * 6);
+      if (CHRIS_BASE + c.y > TANK.surf) {
+        c.phase = "water"; c.t = 0; c.vy *= 0.35; c.sq = 1;
+        splashBig();
+      }
+    }
+  } else if (c.phase === "water") {
+    const rest = 248;
+    c.vy += (-55 * (c.y - rest) - 5.5 * c.vy) * dt;
+    c.y += c.vy * dt;
+    if (CHRIS_BASE + c.y > TANK.floor) { c.y = TANK.floor - CHRIS_BASE; c.vy = Math.min(0, c.vy); }
+    c.rot += (Math.sin(c.t * 4) * 0.07 * Math.exp(-c.t) - c.rot) * Math.min(1, dt * 5);
+    if (c.t > 1.35) {
+      c.phase = "rise"; c.t = 0; c.fromY = c.y; c.fromRot = c.rot;
+      state.level += 1; state.balls = 3; resetBall(); syncHud(); toast(outfit().name);
+      water.slosh = Math.max(water.slosh, 6);
+      water.ripples.push({ x: CHRIS_X, r: 20, life: 0.8 });
+    }
+  } else if (c.phase === "rise") {
+    const p = Math.min(1, c.t / 0.8), e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+    c.seat = Math.max(0, 1 - c.t / 0.25);
+    c.y = c.fromY * (1 - e); c.rot = c.fromRot * (1 - e);
+    if (p < 0.85 && Math.random() < 0.6) {
+      state.particles.push({ x: CHRIS_X + (Math.random() - 0.5) * 70, y: CHRIS_BASE + c.y - Math.random() * 120, vx: (Math.random() - 0.5), vy: 1, life: 0.6, r: 1.5 + Math.random() * 2, color: "#cfefff", g: 0.35, water: true });
+    }
+    if (p >= 1) {
+      Object.assign(c, { phase: "sit", t: 0, y: 0, vy: 0, rot: 0, sq: 0.5, seat: 0 });
+      state.dunking = 0; state.dunkT = 0;
+      resetBall();
+    }
+  }
+}
+function drawTankBack() {
+  const T = TANK;
   ctx.lineCap = "round";
+  ctx.strokeStyle = "#cfd8e3"; ctx.lineWidth = 8;
   ctx.beginPath();
-  ctx.moveTo(x, 180); ctx.lineTo(x, 470);
-  ctx.moveTo(x + 230, 180); ctx.lineTo(x + 230, 470);
-  ctx.moveTo(x, 180); ctx.lineTo(x + 230, 180);
+  ctx.moveTo(T.x - 4, 180); ctx.lineTo(T.x - 4, T.y + 10);
+  ctx.moveTo(T.x + T.w + 4, 180); ctx.lineTo(T.x + T.w + 4, T.y + 10);
+  ctx.moveTo(T.x - 4, 180); ctx.lineTo(T.x + T.w + 4, 180);
+  ctx.moveTo(SEAT.pivotX, SEAT.y); ctx.lineTo(T.x + T.w + 4, SEAT.y);
   ctx.stroke();
+  // lever arm from the frame to the target
   ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.moveTo(x + 20, 210);
-  ctx.lineTo(500, state.target.y);
-  ctx.stroke();
-  ctx.fillStyle = "#163e86";
-  roundRect(x + 10, y + 40, 250, 175, 16);
-  ctx.fill();
-  ctx.strokeStyle = "#8eb6ff";
-  ctx.lineWidth = 4;
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(T.x + 10, 210); ctx.lineTo(500, state.target.y); ctx.stroke();
+  // tank back wall
+  ctx.fillStyle = "#123a7a"; rr(ctx, T.x, T.y, T.w, T.h, 14); ctx.fill();
+  ctx.fillStyle = "#1c5aa8"; rr(ctx, T.x + 8, T.y + 8, T.w - 16, T.h - 16, 10); ctx.fill();
+  // seat plank (hinged at the right, swings down when hit)
   ctx.save();
-  roundRect(x + 18, y + 78, 234, 128, 12);
-  ctx.clip();
-  const wg = ctx.createLinearGradient(0, y + 78, 0, y + 210);
-  wg.addColorStop(0, "#3ec4ef");
-  wg.addColorStop(1, "#1767b8");
-  ctx.fillStyle = wg;
-  ctx.fillRect(x + 18, y + 78, 234, 128);
+  ctx.translate(SEAT.pivotX, SEAT.y);
+  ctx.rotate(-chris.seat * 1.3);
+  ctx.fillStyle = "#c4552a"; ctx.fillRect(-SEAT.len, -8, SEAT.len, 16);
+  ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.fillRect(-SEAT.len, 4, SEAT.len, 4);
   ctx.restore();
-  ctx.save();
-  ctx.translate(x + 120, 248);
-  ctx.rotate(seatDrop * 0.9);
-  ctx.fillStyle = "#c4552a";
-  ctx.fillRect(-70, -8, 140, 16);
-  ctx.restore();
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 16px Trebuchet MS, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("CHRIS", x + 135, y + 68);
-  ctx.font = "11px Trebuchet MS, sans-serif";
-  ctx.fillStyle = "#d6e6ff";
-  ctx.fillText("DUNK TANK", x + 135, y + 84);
 }
-function drawChris(seatDrop) {
+function drawChris() {
   const im = images[outfit().file];
   if (!im) return;
-  const x = 760, y = 250 + seatDrop * 150;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(seatDrop * 0.35);
-  const ih = 210, iw = ih * (im.width / im.height);
-  if (seatDrop > 0.2) {
-    ctx.beginPath();
-    ctx.rect(-iw, -ih, iw * 2, ih + 40 - seatDrop * 80);
-    ctx.clip();
+  const c = chris, t = state.time;
+  let x = CHRIS_X, y = c.y, rot = c.rot, sx = 1, sy = 1;
+  if (c.phase === "sit") {
+    const br = Math.sin(t * 2.4);
+    y += br * 1.8; sy += br * 0.012; sx -= br * 0.006;
+    rot += Math.sin(t * 1.15) * 0.028;
+    if (c.taunt > 0) {
+      const p = 1 - c.taunt;
+      rot += Math.sin(p * Math.PI * 4) * 0.1 * c.taunt;
+      y -= Math.abs(Math.sin(p * Math.PI * 3)) * 14 * c.taunt;
+      sy += Math.sin(p * Math.PI * 6) * 0.035 * c.taunt;
+    }
+  } else if (c.phase === "water") {
+    x += Math.sin(c.t * 3) * 3;
   }
-  ctx.drawImage(im, -iw / 2, -ih + 16, iw, ih);
+  if (c.sq > 0) { sx += 0.16 * c.sq; sy -= 0.16 * c.sq; }
+  const ih = CHRIS_H, iw = ih * (im.width / im.height);
+  ctx.save();
+  if (c.phase !== "sit") { ctx.beginPath(); ctx.rect(0, 0, W, TANK.floor); ctx.clip(); }
+  ctx.translate(x, CHRIS_BASE + y);
+  ctx.rotate(rot);
+  ctx.scale(sx, sy);
+  ctx.drawImage(im, -iw / 2, -ih, iw, ih);
   ctx.restore();
+}
+function drawTankFront() {
+  const T = TANK, x0 = T.x + 8, x1 = T.x + T.w - 8, bottom = T.y + T.h - 8;
+  ctx.save();
+  rr(ctx, x0, T.y + 8, x1 - x0, T.h - 16, 10); ctx.clip();
+  const wg = ctx.createLinearGradient(0, T.surf, 0, bottom);
+  wg.addColorStop(0, "rgba(70,200,240,.62)");
+  wg.addColorStop(1, "rgba(20,96,180,.86)");
+  ctx.fillStyle = wg;
+  ctx.beginPath();
+  ctx.moveTo(x0, bottom);
+  for (let x = x0; x <= x1; x += 10) ctx.lineTo(x, surfaceY(x));
+  ctx.lineTo(x1, surfaceY(x1)); ctx.lineTo(x1, bottom); ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let x = x0; x <= x1; x += 10) x === x0 ? ctx.moveTo(x, surfaceY(x)) : ctx.lineTo(x, surfaceY(x));
+  ctx.stroke();
+  if (water.foam > 0) {
+    ctx.fillStyle = "rgba(255,255,255," + (0.75 * water.foam).toFixed(3) + ")";
+    const fw = 70 + (1 - water.foam) * 60;
+    ctx.beginPath(); ctx.ellipse(CHRIS_X, T.surf, fw, 10 + water.foam * 8, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  water.ripples.forEach(r => {
+    ctx.strokeStyle = "rgba(255,255,255," + (0.6 * Math.max(0, r.life)).toFixed(3) + ")";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(r.x, T.surf + 2, r.r, r.r * 0.16, 0, 0, Math.PI * 2); ctx.stroke();
+  });
+  // glass shine
+  ctx.fillStyle = "rgba(255,255,255,.10)";
+  ctx.beginPath(); ctx.moveTo(x0 + 20, T.y + 8); ctx.lineTo(x0 + 60, T.y + 8); ctx.lineTo(x0 + 10, bottom); ctx.lineTo(x0 - 30, bottom); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = "#8eb6ff"; ctx.lineWidth = 4;
+  rr(ctx, T.x, T.y, T.w, T.h, 14); ctx.stroke();
+  ctx.fillStyle = "#0e2a5c"; rr(ctx, T.x - 6, T.y + T.h - 6, T.w + 12, 12, 5); ctx.fill();
+  ctx.fillStyle = "#c4552a"; rr(ctx, 700, T.y + T.h - 40, 150, 28, 8); ctx.fill();
+  ctx.strokeStyle = "#ffd9a8"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.font = "bold 15px Trebuchet MS, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("CHRIS · DUNK TANK", 775, T.y + T.h - 21);
 }
 function drawTarget() {
   const cfg = levelCfg();
@@ -629,17 +894,20 @@ function drawBall() {
 function draw() {
   ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#071018";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const sw = window.innerWidth, shh = window.innerHeight, wy = (y) => view.oy + y * view.s;
+  const lb = ctx.createLinearGradient(0, wy(0), 0, wy(H));
+  lb.addColorStop(0, "#3d8fe0"); lb.addColorStop(0.55, "#8fcaf3"); lb.addColorStop(0.77, "#74c057"); lb.addColorStop(1, "#3e8a36");
+  ctx.fillStyle = lb;
+  ctx.fillRect(0, 0, sw, shh);
   ctx.save();
   ctx.translate(view.ox, view.oy);
   ctx.scale(view.s, view.s);
   const sh = state.camShake;
   ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
   drawBackground();
-  const seatDrop = state.dunking ? Math.min(1, Math.max(0, (state.dunkT - 0.25) / 0.35)) : 0;
-  drawTank(seatDrop);
-  drawChris(seatDrop);
+  drawTankBack();
+  drawChris();
+  drawTankFront();
   drawTarget();
   drawBall();
   state.particles.forEach(p => {
@@ -666,7 +934,8 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.033, (now - last) / 1000);
   last = now;
-  if (state.started) step(dt);
+  if (state.started) step(dt); else updateDunkTank(dt);
+  updateScenery(dt);
   draw();
   requestAnimationFrame(frame);
 }
@@ -724,7 +993,6 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
 }
 const FALLBACK_OUTFIT = "assets/outfit_cannoli.png";
 Promise.all([
-  loadImage("assets/van.jpg").then(im => images.van = im).catch(() => {}),
   ...outfits.map(o => loadImage(o.file)
     .catch(() => loadImage(FALLBACK_OUTFIT))
     .then(im => images[o.file] = im)
