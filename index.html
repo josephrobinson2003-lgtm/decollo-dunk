@@ -58,7 +58,9 @@
     padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   }
   #sheet.hidden { display: none; }
+  #ver { position: absolute; right: 12px; bottom: 8px; font-size: 11px; color: rgba(213,228,255,.55); font-weight: 700; letter-spacing: .05em; }
   .card {
+    position: relative;
     width: min(520px, 100%);
     background: linear-gradient(180deg, #14366f, #0b1c3d);
     border: 3px solid #7eb0ff; border-radius: 24px;
@@ -116,6 +118,7 @@
       <p><b>Pull the ball back and release.</b> Three throws a level. Smaller, faster targets as you climb.</p>
       <button id="play">Play</button>
       <button id="install" class="ghost">Add to Home Screen</button>
+      <div id="ver">v11</div>
     </div>
   </div>
 </div>
@@ -1114,8 +1117,31 @@ document.getElementById("mute").addEventListener("click", () => {
   document.getElementById("mute").textContent = music.on ? "MUSIC ON" : "MUSIC OFF";
   if (music.on) startMusic(); else stopMusic();
 });
+// ---- Service worker + auto-update ----
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  const sw = navigator.serviceWorker;
+  const hadController = !!sw.controller;
+  let reloadPending = false;
+  const reloadOnce = () => {
+    const last = Number(sessionStorage.getItem("cd-sw-reload") || 0);
+    if (Date.now() - last < 15000) return; // loop guard
+    sessionStorage.setItem("cd-sw-reload", String(Date.now()));
+    location.reload();
+  };
+  sw.addEventListener("controllerchange", () => {
+    if (!hadController) return; // first install: this page is already current
+    // Don't yank the page mid-game; reload when the app is backgrounded or the start screen is showing.
+    const midGame = state.started && sheet.classList.contains("hidden");
+    if (midGame && document.visibilityState === "visible") reloadPending = true;
+    else reloadOnce();
+  });
+  sw.register("sw.js", { updateViaCache: "none" }).then((reg) => {
+    reg.update().catch(() => {});
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
+      else if (reloadPending) reloadOnce();
+    });
+  }).catch(() => {});
 }
 const FALLBACK_OUTFIT = "assets/outfit_cannoli.png";
 Promise.all([

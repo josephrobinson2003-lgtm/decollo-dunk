@@ -1,4 +1,7 @@
-const CACHE = "chris-dunk-v10";
+// Chris Dunk service worker
+const VERSION = "v11";
+const CACHE = "chris-dunk-" + VERSION;
+// App shell: always fetched fresh from the network when online.
 const CORE = [
   "./",
   "./index.html",
@@ -36,28 +39,71 @@ const OPTIONAL = [
   "./assets/voice/dunk2.mp3",
   "./assets/voice/dunk3.mp3"
 ];
+// cache: "reload" bypasses the browser HTTP cache (GitHub Pages sends max-age=600),
+// so a new version never gets pre-cached with the previous build's files.
+const fresh = (u) => new Request(u, { cache: "reload" });
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then(async (cache) => {
-    await cache.addAll(CORE);
-    await Promise.all(OPTIONAL.map((u) => cache.add(u).catch(() => {})));
-  }));
   self.skipWaiting();
+  event.waitUntil(caches.open(CACHE).then(async (cache) => {
+    await cache.addAll(CORE.map(fresh));
+    await Promise.all(OPTIONAL.map((u) => cache.add(fresh(u)).catch(() => {})));
+  }));
 });
+
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    const old = keys.filter((k) => k !== CACHE);
+    await Promise.all(old.map((k) => caches.delete(k)));
+    await self.clients.claim();
+    // Pages from v10 and earlier have no update handler of their own, so reload them once here.
+    const legacy = old.some((k) => k.startsWith("dunk-decollo") || (/^chris-dunk-v(\d+)$/.test(k) && Number(RegExp.$1) <= 10));
+    if (legacy) {
+      const wins = await self.clients.matchAll({ type: "window" });
+      wins.forEach((w) => { try { w.navigate(w.url); } catch (e) {} });
+    }
+  })());
 });
+
+function isShell(req, url) {
+  if (req.mode === "navigate") return true;
+  const p = url.pathname;
+  return p.endsWith("/") || p.endsWith("/index.html") || p.endsWith(".webmanifest") || p.endsWith("/sw.js");
+}
+
+async function networkFirst(req, url) {
+  const cache = await caches.open(CACHE);
+  try {
+    const res = await fetch(url.href, { cache: "no-store", credentials: "same-origin" });
+    if (res && res.ok) cache.put(url.origin + url.pathname, res.clone()).catch(() => {});
+    return res;
+  } catch (e) {
+    return (await cache.match(url.origin + url.pathname)) ||
+      (req.mode === "navigate" ? (await cache.match("./index.html")) || (await cache.match("./")) : undefined) ||
+      Response.error();
+  }
+}
+
+async function staleWhileRevalidate(event, req) {
+  const cache = await caches.open(CACHE);
+  const hit = await cache.match(req);
+  const net = fetch(req).then((res) => {
+    if (res && res.status === 200) cache.put(req, res.clone()).catch(() => {});
+    return res;
+  });
+  if (hit) {
+    event.waitUntil(net.catch(() => {}));
+    return hit;
+  }
+  return net;
+}
+
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then((hit) => hit || fetch(event.request).then((res) => {
-      if (res.ok && new URL(event.request.url).origin === self.location.origin) {
-        const copy = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});
-      }
-      return res;
-    }).catch(() => caches.match("./index.html")))
-  );
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (req.headers.has("range")) return; // let the browser handle partial audio requests
+  event.respondWith(isShell(req, url) ? networkFirst(req, url) : staleWhileRevalidate(event, req));
 });
