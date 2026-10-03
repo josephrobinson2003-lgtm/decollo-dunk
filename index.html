@@ -6,11 +6,11 @@
 <meta name="theme-color" content="#123a86" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Dunk DeCollo" />
+<meta name="apple-mobile-web-app-title" content="Chris Dunk" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="icon" href="icons/icon-192.png" />
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
-<title>Dunk DeCollo</title>
+<title>Chris Dunk</title>
 <style>
   :root { color-scheme: dark; --blue:#123a86; --gold:#f0c14b; }
   * { box-sizing: border-box; }
@@ -102,8 +102,8 @@
       <div class="pill"><b>BALLS</b><span id="balls">3</span></div>
       <button id="mute" type="button">MUSIC ON</button>
       <div class="brand pill">
-        <div class="name">DeCOLLO ELECTRIC</div>
-        <div class="sub">314-780-6507 · LICENSED BONDED INSURED</div>
+        <div class="name">CHRIS DUNK</div>
+        <div class="sub">HIT THE TARGET · DUNK CHRIS</div>
       </div>
     </div>
   </div>
@@ -111,8 +111,8 @@
   <div id="sheet">
     <div class="card">
       <div class="mark"></div>
-      <h1>DUNK <span>DeCOLLO</span></h1>
-      <p>Hit the bullseye to drop Chris DeCollo into the tank. His van stays in the background. Outfits change every level.</p>
+      <h1>CHRIS <span>DUNK</span></h1>
+      <p>Hit the bullseye to drop Chris into the tank. His van stays in the background. Outfits change every level.</p>
       <p><b>Pull the ball back and release.</b> Three throws a level. Smaller, faster targets as you climb.</p>
       <button id="play">Play</button>
       <button id="install" class="ghost">Add to Home Screen</button>
@@ -133,7 +133,7 @@ const installBtn = document.getElementById("install");
 
 const W = 1100, H = 640;
 let view = { s: 1, ox: 0, oy: 0, dpr: 1 };
-const BEST_KEY = "decollo-dunk-best";
+const BEST_KEY = "chris-dunk-best";
 let best = Number(localStorage.getItem(BEST_KEY) || 0);
 bestEl.textContent = best;
 
@@ -493,10 +493,10 @@ function drawTank(seatDrop) {
   ctx.fillStyle = "#fff";
   ctx.font = "bold 16px Trebuchet MS, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("DeCOLLO", x + 135, y + 68);
+  ctx.fillText("CHRIS", x + 135, y + 68);
   ctx.font = "11px Trebuchet MS, sans-serif";
   ctx.fillStyle = "#d6e6ff";
-  ctx.fillText("ELECTRIC", x + 135, y + 84);
+  ctx.fillText("DUNK TANK", x + 135, y + 84);
 }
 function drawChris(seatDrop) {
   const im = images[outfit().file];

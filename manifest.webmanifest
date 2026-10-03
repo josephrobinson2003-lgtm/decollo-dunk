@@ -1,7 +1,7 @@
 {
-  "name": "Dunk DeCollo",
-  "short_name": "Dunk DeCollo",
-  "description": "Throw the ball, hit the target, and dunk Chris DeCollo of DeCollo Electric.",
+  "name": "Chris Dunk",
+  "short_name": "Chris Dunk",
+  "description": "Throw the ball, hit the target, and dunk Chris.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
