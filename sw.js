@@ -1,4 +1,4 @@
-const CACHE = "dunk-decollo-v3";
+const CACHE = "dunk-decollo-v4";
 const CORE = [
   "./",
   "./index.html",
