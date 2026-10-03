@@ -1,4 +1,4 @@
-const CACHE = "chris-dunk-v9";
+const CACHE = "chris-dunk-v10";
 const CORE = [
   "./",
   "./index.html",

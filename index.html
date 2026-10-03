@@ -496,8 +496,8 @@ function roundRect(x, y, w, h, r) {
 // ================= Scenery (static layers cached offscreen; only clouds, wheel, bunting animate) =================
 const TANK = { x: 650, y: 360, w: 250, h: 185, surf: 380 };
 TANK.floor = TANK.y + TANK.h - 8;
-const SEAT = { pivotX: 830, y: 248, len: 140 };
-const CHRIS_X = 760, CHRIS_BASE = 266, CHRIS_H = 210;
+const SEAT = { pivotX: 830, y: 262, len: 140 };
+const CHRIS_X = 760, CHRIS_BASE = 262, CHRIS_H = 210;
 const scenery = { key: "", back: null, front: null, clouds: [] };
 function seeded(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
 (function () {
@@ -732,7 +732,7 @@ function updateDunkTank(dt) {
       }
     }
   } else if (c.phase === "water") {
-    const rest = 248;
+    const rest = 243;
     c.vy += (-55 * (c.y - rest) - 5.5 * c.vy) * dt;
     c.y += c.vy * dt;
     if (CHRIS_BASE + c.y > TANK.floor) { c.y = TANK.floor - CHRIS_BASE; c.vy = Math.min(0, c.vy); }
@@ -781,6 +781,128 @@ function drawTankBack() {
   ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.fillRect(-SEAT.len, 4, SEAT.len, 4);
   ctx.restore();
 }
+// ================= Legs (drawn under each outfit photo) =================
+// Image geometry, keyed by the photo that actually loaded (fallback-aware).
+// waist: fraction of photo height where the hips sit; keep: fraction of photo drawn (crops stools etc.).
+const LEG_GEOM = {
+  default: { scale: 1, keep: 1, waist: 0.965, thighs: true, hipX: 0.2, kneeX: 0.22, kneeY: 20, shinW: 32, shinL: 60 },
+  // Polo photo already shows jeans to the knee: crop off the stool, scale up to match, and hang shins from its knees.
+  "outfit_elec.png": { scale: 1.3, keep: 0.875, waist: 0.73, thighs: false, kneeXL: -0.22, kneeXR: 0.24, shinW: 40, shinL: 58, pants: "#3a5175", shade: "#283a57" }
+};
+// Clothing style, keyed by outfit.
+const LEG_STYLE = {
+  default: { kind: "pants", pants: "#3a5f99", shade: "#2a4877", shoe: "boot", shoeCol: "#6b4423" },
+  "assets/outfit_cowboy.png": { kind: "pants", pants: "#3f66a3", shade: "#2b4b7e", shoe: "cowboy", shoeCol: "#8b5a2b" },
+  "assets/outfit_tux.png": { kind: "pants", pants: "#1c1c22", shade: "#0c0c10", shoe: "dress", shoeCol: "#0b0b0d" },
+  "assets/outfit_swim.png": { kind: "trunks", pants: "#e0413a", shade: "#b3302b", shoe: "bare" },
+  "assets/outfit_jersey.png": { kind: "shorts", pants: "#1f3f8f", shade: "#16306e", shoe: "sneaker", shoeCol: "#f4f4f4" }
+};
+const SKIN = "#d6a07e", SKIN_SHADE = "#bf8766";
+function legGeomFor(im) {
+  const name = (im.currentSrc || im.src || "").split("/").pop().split("?")[0];
+  return LEG_GEOM[name] || LEG_GEOM.default;
+}
+function quad(g, x1, y1, w1, x2, y2, w2) {
+  g.beginPath();
+  g.moveTo(x1 - w1 / 2, y1); g.lineTo(x1 + w1 / 2, y1);
+  g.lineTo(x2 + w2 / 2, y2); g.lineTo(x2 - w2 / 2, y2);
+  g.closePath(); g.fill();
+}
+// kick: forward swing angle in radians (0 = hanging straight down, >PI/2 = foot raised above knee)
+function drawLeg(g, st, kx, ky, kick, lat, w, side, L, cap) {
+  const c = Math.cos(kick), len = L * c, w2 = w * 0.78;
+  const bare = st.kind !== "pants";
+  g.save();
+  g.translate(kx, ky);
+  g.rotate(lat);
+  const shinCol = bare ? SKIN : st.pants, shinShade = bare ? SKIN_SHADE : st.shade;
+  const drawShin = () => {
+    g.fillStyle = shinCol; quad(g, 0, 0, w, 0, len, w2);
+    g.fillStyle = shinShade; quad(g, -side * w * 0.32, 0, w * 0.3, -side * w2 * 0.32, len, w2 * 0.3);
+    if (st.kind === "shorts") { g.fillStyle = "#ffffff"; quad(g, 0, len * 0.68, w2 * 1.04, 0, len * 0.98, w2 * 1.02); }
+    if (st.shoe === "cowboy") { g.fillStyle = st.shoeCol; quad(g, 0, len * 0.5, w2 * 1.2, 0, len, w2 * 1.1); g.fillStyle = "rgba(255,225,170,.5)"; g.fillRect(-w2 * 0.6, len * 0.56, w2 * 1.2, 2); }
+  };
+  const drawShoe = () => {
+    const sy = len, sw = w2 * 1.3, sh = 12 + Math.max(0, 1 - Math.abs(c)) * 8;
+    const showSole = Math.abs(c) < 0.55 || c < 0;
+    if (st.shoe === "bare") {
+      g.fillStyle = SKIN; g.beginPath(); g.ellipse(0, sy + 4, sw * 0.45, sh * 0.5, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = SKIN_SHADE; for (let i = -2; i <= 2; i++) { g.beginPath(); g.arc(i * sw * 0.13, sy + 4 + sh * 0.35 * Math.sign(c || 1), 2, 0, Math.PI * 2); g.fill(); }
+    } else {
+      if (showSole) { g.fillStyle = st.shoe === "sneaker" ? "#d9d9d9" : "#2a1a0e"; g.beginPath(); g.ellipse(0, sy + (c < 0 ? -6 : 8), sw * 0.5, sh * 0.6, 0, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = st.shoeCol;
+      g.beginPath(); g.ellipse(0, sy + 4, sw * 0.5, sh * 0.5, 0, 0, Math.PI * 2); g.fill();
+      if (st.shoe === "cowboy") { g.beginPath(); g.moveTo(-sw * 0.25, sy + 6); g.lineTo(0, sy + 6 + sh * 0.8); g.lineTo(sw * 0.25, sy + 6); g.fill(); }
+      if (st.shoe === "dress") { g.fillStyle = "rgba(255,255,255,.35)"; g.beginPath(); g.ellipse(-sw * 0.15, sy + 1, sw * 0.14, 2.5, 0, 0, Math.PI * 2); g.fill(); }
+      if (st.shoe === "sneaker") { g.fillStyle = "#e0413a"; g.fillRect(-sw * 0.4, sy + 3, sw * 0.8, 3); }
+      if (st.shoe === "boot") { g.fillStyle = "#3b2412"; g.fillRect(-sw * 0.5, sy + 7, sw, 3); }
+    }
+  };
+  if (c >= 0) { drawShin(); drawShoe(); } else { drawShoe(); drawShin(); }
+  if (cap) {
+    g.fillStyle = bare ? SKIN : st.pants;
+    g.beginPath(); g.ellipse(0, 0, w * 0.6, w * 0.42, 0, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+function drawLegs(g, geo, st0, iw, kick, lat) {
+  const st = geo.pants && st0.kind === "pants" ? Object.assign({}, st0, { pants: geo.pants, shade: geo.shade }) : st0;
+  const sides = [-1, 1];
+  if (geo.thighs) {
+    // hips/seat band so the shirt hem sits on the pants
+    g.fillStyle = st.kind === "trunks" ? st.pants : st.kind === "pants" || st.kind === "shorts" ? st.pants : SKIN;
+    rr(g, -iw * 0.38, -8, iw * 0.76, 20, 8); g.fill();
+    if (st.kind === "pants") { g.fillStyle = "#3b2412"; g.fillRect(-iw * 0.38, -8, iw * 0.76, 4); g.fillStyle = "#c9a227"; g.fillRect(-5, -8, 10, 4); }
+  }
+  sides.forEach((s, i) => {
+    let kx, ky;
+    if (geo.thighs) {
+      const hx = s * geo.hipX * iw; kx = s * geo.kneeX * iw; ky = geo.kneeY;
+      const thighCol = st.kind === "pants" || st.kind === "shorts" ? st.pants : SKIN;
+      g.fillStyle = thighCol; quad(g, hx, -2, 48, kx, ky, 42);
+      if (st.kind === "trunks") { g.fillStyle = st.pants; quad(g, hx, -2, 50, hx + (kx - hx) * 0.6, ky * 0.6, 47); }
+      g.fillStyle = "rgba(0,0,0,.14)"; quad(g, hx - s * 17, -2, 12, kx - s * 15, ky, 10);
+      if (st.kind === "shorts") { g.fillStyle = st.shade; quad(g, kx, ky - 4, 40, kx, ky + 2, 40); }
+    } else {
+      kx = (s < 0 ? geo.kneeXL : geo.kneeXR) * iw;
+      ky = (geo.keep - geo.waist) * CHRIS_H * geo.scale - 7;
+    }
+    drawLeg(g, st, kx, ky, kick[i], lat[i], geo.shinW, s, geo.shinL, geo.thighs);
+  });
+}
+function legPose(c, t) {
+  const kick = [0, 0], lat = [0, 0];
+  if (c.phase === "sit") {
+    for (let i = 0; i < 2; i++) {
+      const ph = i * Math.PI;
+      kick[i] = 0.25 + 0.28 * Math.sin(t * 2.6 + ph);
+      lat[i] = 0.05 * Math.sin(t * 1.3 + ph) + (i ? 0.04 : -0.04);
+      if (c.taunt > 0) {
+        const p = 1 - c.taunt;
+        kick[i] += Math.max(0, Math.sin(p * Math.PI * 4 + ph)) * 1.1 * c.taunt;
+      }
+    }
+  } else if (c.phase === "drop") {
+    for (let i = 0; i < 2; i++) {
+      const ph = i * 2.1, k = Math.min(1, c.t / 0.2);
+      kick[i] = (1.3 + 0.7 * Math.sin(t * 19 + ph)) * k + 0.25 * (1 - k);
+      lat[i] = (i ? 1 : -1) * (0.15 + 0.25 * Math.sin(t * 15 + ph)) * k;
+    }
+  } else if (c.phase === "water") {
+    const e = Math.exp(-c.t * 2);
+    for (let i = 0; i < 2; i++) {
+      const ph = i * Math.PI;
+      kick[i] = 0.55 + 0.35 * Math.sin(c.t * 3 + ph) + 0.8 * e;
+      lat[i] = (i ? 1 : -1) * (0.08 + 0.06 * Math.sin(c.t * 2.2 + ph)) + (i ? 0.3 : -0.3) * e;
+    }
+  } else {
+    for (let i = 0; i < 2; i++) {
+      kick[i] = 0.35 + 0.15 * Math.sin(c.t * 9 + i * Math.PI);
+      lat[i] = (i ? 0.06 : -0.06);
+    }
+  }
+  return { kick, lat };
+}
 function drawChris() {
   const im = images[outfit().file];
   if (!im) return;
@@ -800,13 +922,17 @@ function drawChris() {
     x += Math.sin(c.t * 3) * 3;
   }
   if (c.sq > 0) { sx += 0.16 * c.sq; sy -= 0.16 * c.sq; }
-  const ih = CHRIS_H, iw = ih * (im.width / im.height);
+  const geo = legGeomFor(im), st = LEG_STYLE[outfit().file] || LEG_STYLE.default;
+  const ih = CHRIS_H * geo.scale, iw = ih * (im.width / im.height);
+  const pose = legPose(c, t);
   ctx.save();
   if (c.phase !== "sit") { ctx.beginPath(); ctx.rect(0, 0, W, TANK.floor); ctx.clip(); }
   ctx.translate(x, CHRIS_BASE + y);
   ctx.rotate(rot);
   ctx.scale(sx, sy);
-  ctx.drawImage(im, -iw / 2, -ih, iw, ih);
+  const srcH = im.height * geo.keep;
+  ctx.drawImage(im, 0, 0, im.width, srcH, -iw / 2, -ih * geo.waist, iw, ih * geo.keep);
+  drawLegs(ctx, geo, st, iw, pose.kick, pose.lat);
   ctx.restore();
 }
 function drawTankFront() {
