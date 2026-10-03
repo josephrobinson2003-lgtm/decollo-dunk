@@ -1,5 +1,5 @@
 // Chris Dunk service worker
-const VERSION = "v11";
+const VERSION = "v12";
 const CACHE = "chris-dunk-" + VERSION;
 // App shell: always fetched fresh from the network when online.
 const CORE = [
