@@ -37,7 +37,20 @@ const OPTIONAL = [
   "./assets/voice/miss3.mp3",
   "./assets/voice/dunk1.mp3",
   "./assets/voice/dunk2.mp3",
-  "./assets/voice/dunk3.mp3"
+  "./assets/voice/dunk3.mp3",
+  "./assets/voice/taunt7.mp3",
+  "./assets/voice/taunt8.mp3",
+  "./assets/voice/taunt9.mp3",
+  "./assets/voice/taunt10.mp3",
+  "./assets/voice/taunt11.mp3",
+  "./assets/voice/taunt12.mp3",
+  "./assets/voice/taunt13.mp3",
+  "./assets/voice/miss4.mp3",
+  "./assets/voice/miss5.mp3",
+  "./assets/voice/miss6.mp3",
+  "./assets/voice/dunk4.mp3",
+  "./assets/voice/dunk5.mp3",
+  "./assets/voice/dunk6.mp3"
 ];
 // cache: "reload" bypasses the browser HTTP cache (GitHub Pages sends max-age=600),
 // so a new version never gets pre-cached with the previous build's files.
