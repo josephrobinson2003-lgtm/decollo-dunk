@@ -149,6 +149,11 @@ const outfits = [
   { file: "assets/outfit_swim.png", name: "CANNONBALL TRUNKS", taunt: "Trunks on. Still not worried." }
 ];
 const dunkLines = ["assets/dunk1.mp3","assets/dunk2.mp3","assets/dunk3.mp3","assets/dunk4.mp3","assets/dunk5.mp3"];
+const VOICE = {
+  taunt: ["assets/voice/taunt1.mp3","assets/voice/taunt2.mp3","assets/voice/taunt3.mp3","assets/voice/taunt4.mp3","assets/voice/taunt5.mp3","assets/voice/taunt6.mp3"],
+  miss: ["assets/voice/miss1.mp3","assets/voice/miss2.mp3","assets/voice/miss3.mp3"],
+  dunk: ["assets/voice/dunk1.mp3","assets/voice/dunk2.mp3","assets/voice/dunk3.mp3"]
+};
 const images = {};
 function loadImage(src) {
   return new Promise((res, rej) => {
@@ -298,11 +303,69 @@ function stopMusic() {
   music.timer = null;
   if (music.master) { try { music.master.disconnect(); } catch (e) {} music.master = null; }
 }
+// ---- Voice channel: one clip at a time (taunts, miss lines, dunk reactions, dunk sounds) ----
+const voice = { raw: {}, buf: {}, decoded: false, src: null, busyUntil: 0, token: 0, last: {}, nextTaunt: 0 };
+// Preload bytes right away (no playback); decode only after the first tap creates the AudioContext.
+[...dunkLines, ...VOICE.taunt, ...VOICE.miss, ...VOICE.dunk].forEach(src => {
+  voice.raw[src] = fetch(src).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+});
+function unlockVoices() {
+  if (voice.decoded) return;
+  voice.decoded = true;
+  let c; try { c = ac(); } catch (e) { return; }
+  Object.keys(voice.raw).forEach(src => {
+    voice.raw[src].then(bytes => {
+      if (!bytes) return;
+      return new Promise((res, rej) => c.decodeAudioData(bytes, res, rej)).then(b => { voice.buf[src] = b; });
+    }).catch(() => {});
+  });
+}
+function voiceNow() { return audio.ctx ? audio.ctx.currentTime : performance.now() / 1000; }
+function voiceIdle() { return !voice.src && voiceNow() > voice.busyUntil; }
+function stopVoice() {
+  voice.token++;
+  if (voice.src) { try { voice.src.stop(); } catch (e) {} voice.src = null; }
+  voice.busyUntil = 0;
+}
+function pickLine(group, list) {
+  let i = Math.floor(Math.random() * list.length);
+  if (list.length > 1 && i === voice.last[group]) i = (i + 1) % list.length;
+  voice.last[group] = i;
+  return list[i];
+}
+// Plays clips back-to-back on the voice channel. Returns false if nothing could play.
+function playVoiceSeq(list) {
+  if (!audio.ctx || !voice.decoded) return false;
+  const token = ++voice.token;
+  const next = (i) => {
+    if (token !== voice.token || i >= list.length) { if (token === voice.token) voice.src = null; return; }
+    const c = audio.ctx, b = voice.buf[list[i]];
+    if (!b) { next(i + 1); return; }
+    const s = c.createBufferSource();
+    const g = c.createGain();
+    g.gain.value = 1;
+    s.buffer = b; s.connect(g); g.connect(c.destination);
+    voice.src = s;
+    voice.busyUntil = c.currentTime + b.duration + 0.3;
+    s.onended = () => { if (token === voice.token) { voice.src = null; setTimeout(() => next(i + 1), 120); } };
+    s.start();
+  };
+  next(0);
+  return true;
+}
+function sayTaunt() {
+  if (!voiceIdle()) return;
+  playVoiceSeq([pickLine("taunt", VOICE.taunt)]);
+}
+function sayMiss() {
+  if (!voiceIdle()) return;
+  playVoiceSeq([pickLine("miss", VOICE.miss)]);
+}
 function playDunkVoice() {
-  const src = dunkLines[Math.floor(Math.random() * dunkLines.length)];
-  const a = new Audio(src);
-  a.volume = 1;
-  a.play().catch(() => {});
+  // Reaction line as he drops, then one of the dunk sounds right after - never overlapping.
+  stopVoice();
+  playVoiceSeq([pickLine("dunk", VOICE.dunk), pickLine("dunkfx", dunkLines)]);
+  voice.nextTaunt = state.time + 9;
   try {
     const c = ac();
     const o = c.createOscillator();
@@ -370,6 +433,8 @@ function onDunk(accuracy) {
   if (navigator.vibrate) navigator.vibrate([20, 40, 80]);
 }
 function missResolve() {
+  sayMiss();
+  voice.nextTaunt = state.time + 7 + Math.random() * 3;
   if (state.balls <= 0 && !state.dunking) {
     toast(outfit().taunt);
     setTimeout(() => { state.balls = 3; resetBall(); syncHud(); }, 800);
@@ -381,6 +446,10 @@ function step(dt) {
   const cfg = levelCfg();
   state.target = targetPos(state.time);
   if (state.camShake > 0) state.camShake *= 0.9;
+  if (!state.dunking && !state.inFlight && state.time > voice.nextTaunt) {
+    voice.nextTaunt = state.time + 6 + Math.random() * 4;
+    sayTaunt();
+  }
   if (state.inFlight && state.ball) {
     const b = state.ball;
     b.vx += Math.sin(state.windPhase * 1.4) * cfg.wind * 40 * dt * 60;
@@ -632,6 +701,8 @@ installBtn.addEventListener("click", async () => {
 });
 playBtn.addEventListener("click", () => {
   try { ac(); } catch (e) {}
+  unlockVoices();
+  voice.nextTaunt = state.time + 3.5;
   sheet.classList.add("hidden");
   state.started = true;
   state.level = 1;

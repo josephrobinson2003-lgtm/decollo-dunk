@@ -1,4 +1,4 @@
-const CACHE = "chris-dunk-v7";
+const CACHE = "chris-dunk-v8";
 const CORE = [
   "./",
   "./index.html",
@@ -23,7 +23,19 @@ const OPTIONAL = [
   "./assets/dunk2.mp3",
   "./assets/dunk3.mp3",
   "./assets/dunk4.mp3",
-  "./assets/dunk5.mp3"
+  "./assets/dunk5.mp3",
+  "./assets/voice/taunt1.mp3",
+  "./assets/voice/taunt2.mp3",
+  "./assets/voice/taunt3.mp3",
+  "./assets/voice/taunt4.mp3",
+  "./assets/voice/taunt5.mp3",
+  "./assets/voice/taunt6.mp3",
+  "./assets/voice/miss1.mp3",
+  "./assets/voice/miss2.mp3",
+  "./assets/voice/miss3.mp3",
+  "./assets/voice/dunk1.mp3",
+  "./assets/voice/dunk2.mp3",
+  "./assets/voice/dunk3.mp3"
 ];
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then(async (cache) => {
